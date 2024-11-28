@@ -1,172 +1,173 @@
 from __future__ import annotations
-from sqlite3 import Row
-from typing import Iterable, Any
-import aiosqlite
-from os import system
+from typing import List
+from sqlalchemy.exc import OperationalError
+from sqlalchemy import Column, Integer, String, ForeignKey, delete, update
+from sqlalchemy.future import select
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import relationship, selectinload
 
-path = "Database/base.db"
+path = "sqlite+aiosqlite:///Database/base.db"
+
+Base = declarative_base()
+
+
+class User(Base):
+    __tablename__ = 'users'
+    user_id = Column(Integer, primary_key=True)
+
+
+class Author(Base):
+    __tablename__ = 'authors'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    author = Column(String, nullable=False)
+
+    books = relationship("Book", back_populates="author")
+
+
+class Genre(Base):
+    __tablename__ = 'genres'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    genre = Column(String, nullable=False)
+
+    books = relationship("Book", back_populates="genre")
+
+
+class Book(Base):
+    __tablename__ = 'books'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String, nullable=False)
+    author_id = Column(Integer, ForeignKey('authors.id'), nullable=False)
+    genre_id = Column(Integer, ForeignKey('genres.id'), nullable=False)
+    description = Column(String)
+    pages = Column(Integer, nullable=False)
+    pages_read = Column(Integer, nullable=False)
+
+    author = relationship("Author", back_populates="books")
+    genre = relationship("Genre", back_populates="books")
 
 
 async def check_db():
-    system("cls")
-    async with aiosqlite.connect(path) as db:
-        cursor = await db.cursor()
+    engine = create_async_engine(path, echo=True)
+
+    async with engine.begin() as conn:
         try:
-            await cursor.execute("SELECT * FROM users")
-        except aiosqlite.OperationalError:
-            await cursor.execute("""CREATE TABLE "users" (
-"user_id"	INTEGER 
-)""")
-            await cursor.execute("""CREATE TABLE "authors" (
-"id"	INTEGER UNIQUE,
-"author"	TEXT NOT NULL,
-PRIMARY KEY("id" AUTOINCREMENT)
-)""")
-            await cursor.execute("""CREATE TABLE "genres" (
-"id"	INTEGER UNIQUE,
-"genre"	TEXT NOT NULL,
-PRIMARY KEY("id" AUTOINCREMENT)
-)""")
-            await cursor.execute("""CREATE TABLE "books" (
-"id"	INTEGER UNIQUE,
-"name"	TEXT NOT NULL,
-"author_id"	INTEGER NOT NULL,
-"genre_id"	INTEGER NOT NULL,
-"description"	TEXT,
-"pages"	INTEGER NOT NULL,
-"pages_read"	INTEGER NOT NULL,
-FOREIGN KEY("genre_id") REFERENCES "genres"("id"),
-FOREIGN KEY("author_id") REFERENCES "authors"("id"),
-PRIMARY KEY("id" AUTOINCREMENT)
-)""")
-            await db.commit()
+            await conn.run_sync(Base.metadata.create_all)
+        except OperationalError:
+            print("Ошибка при создании таблиц. Возможно, база данных уже существует.")
 
 
-async def get_user_exists(user_id) -> bool:
-    async with aiosqlite.connect(path) as db:
-        cursor = await db.cursor()
-        await cursor.execute(f"SELECT * FROM users WHERE user_id = ?", (user_id,))
-        user = await cursor.fetchone()
-        if user is None:
-            return False
-        else:
-            return True
+async_engine = create_async_engine(path, echo=True)
+AsyncSessionLocal = async_sessionmaker(async_engine, expire_on_commit=False)
 
 
-async def add_user(user_id):
-    async with aiosqlite.connect(path) as db:
-        cursor = await db.cursor()
-        await cursor.execute(f"INSERT INTO users (user_id) VALUES (?)", (user_id,))
-        await db.commit()
+async def get_user_exists(user_id: int, session: AsyncSession) -> bool:
+    result = await session.execute(select(User).where(User.user_id == user_id))
+    user = result.scalars().first()
+    return user is not None
 
 
-async def add_genre(genre: str) -> str | Any:
-    async with aiosqlite.connect(path) as db:
-        cursor = await db.cursor()
-        await cursor.execute("SELECT * FROM genres WHERE genre = ?", (genre,))
-        existing_genre = await cursor.fetchone()
-        if existing_genre:
-            return existing_genre[0]
-        else:
-            await cursor.execute("INSERT INTO genres (genre) VALUES (?)", (genre,))
-            await db.commit()
-            await cursor.execute("SELECT * FROM genres WHERE genre = ?", (genre,))
-            genre = await cursor.fetchone()
-            return genre[0]
+async def add_user(user_id: int, session: AsyncSession):
+    new_user = User(user_id=user_id)
+    session.add(new_user)
+    await session.commit()
 
 
-async def add_author(author: str) -> str | Any:
-    async with aiosqlite.connect(path) as db:
-        cursor = await db.cursor()
-        await cursor.execute("SELECT * FROM authors WHERE author = ?", (author,))
-        existing_autor = await cursor.fetchone()
-        if existing_autor:
-            return existing_autor[0]
-        else:
-            await cursor.execute("INSERT INTO authors (author) VALUES (?)", (author,))
-            await db.commit()
-            await cursor.execute("SELECT * FROM authors WHERE author = ?", (author,))
-            author = await cursor.fetchone()
-            return author[0]
+async def get_all_books(session: AsyncSession) -> List[Book]:
+    result = await session.execute(
+        select(Book)
+        .options(selectinload(Book.author), selectinload(Book.genre))
+    )
+    return list(result.scalars().all())
 
 
-async def delete_book(book_id: int):
-    async with aiosqlite.connect(path) as db:
-        cursor = await db.cursor()
-        await cursor.execute("DELETE FROM books WHERE id = ?", (book_id,))
-        await db.commit()
+async def get_all_genres(session: AsyncSession) -> List[Genre]:
+    result = await session.execute(select(Genre))
+    return list(result.scalars().all())
 
 
-async def add_book(name: str, author_id: int, genre_id: int, description: str, pages: int, pages_read: int):
-    async with aiosqlite.connect(path) as db:
-        cursor = await db.cursor()
-        await cursor.execute("INSERT INTO books (name, author_id, genre_id, description, pages, pages_read) "
-                             "VALUES (?, ?, ?, ?, ?, ?)",
-                             (name, author_id, genre_id, description, pages, pages_read))
-        await db.commit()
+async def get_all_authors(session: AsyncSession) -> List[Genre]:
+    result = await session.execute(select(Author))
+    return list(result.scalars().all())
 
 
-async def update_read_page(book_id: int, read_page: int):
-    async with aiosqlite.connect(path) as db:
-        cursor = await db.cursor()
-        await cursor.execute("UPDATE books SET pages_read = ? WHERE id = ?",
-                             (read_page, book_id))
-        await db.commit()
+async def add_genre(genre: str, session: AsyncSession) -> int:
+    result = await session.execute(select(Genre).where(Genre.genre == genre))
+    existing_genre = result.scalars().first()
+
+    if existing_genre:
+        return existing_genre.id
+    else:
+        new_genre = Genre(genre=genre)
+        session.add(new_genre)
+        await session.commit()
+        return new_genre.id
 
 
-async def get_all_books() -> Iterable[Row] | None:
-    async with aiosqlite.connect(path) as db:
-        cursor = await db.cursor()
-        await cursor.execute("""SELECT books.id, books.name, authors.author, genres.genre, books.description, books.pages
-FROM ((books
-INNER JOIN authors ON books.author_id = authors.id)
-INNER JOIN genres ON books.genre_id = genres.id)
-""")
-        books = await cursor.fetchall()
-        return books
+async def get_genre_by_id(genre_id: int, session: AsyncSession) -> Genre | None:
+    result = await session.execute(select(Genre).where(Genre.id == genre_id))
+    return result.scalar_one_or_none()
 
 
-async def get_all_genres() -> Iterable[Row] | None:
-    async with aiosqlite.connect(path) as db:
-        cursor = await db.cursor()
-        await cursor.execute("SELECT * FROM genres")
-        genres = await cursor.fetchall()
-        return genres
+async def add_author(author: str, session: AsyncSession) -> str:
+    result = await session.execute(select(Author).where(Author.author == author))
+    existing_author = result.scalar_one_or_none()
+
+    if existing_author:
+        return existing_author.id
+    else:
+        new_author = Author(author=author)
+        session.add(new_author)
+        await session.commit()
+        return new_author.id
 
 
-async def get_all_authors() -> Iterable[Row] | None:
-    async with aiosqlite.connect(path) as db:
-        cursor = await db.cursor()
-        await cursor.execute("SELECT * FROM authors")
-        authors = await cursor.fetchall()
-        return authors
+async def get_author_by_id(author_id: int, session: AsyncSession) -> Author | None:
+    result = await session.execute(select(Author).where(Author.id == author_id))
+    return result.scalar_one_or_none()
 
 
-async def get_book_by_id(book_id: int) -> Row | None:
-    async with aiosqlite.connect(path) as db:
-        cursor = await db.cursor()
-        await cursor.execute("""SELECT books.id, books.name, authors.author, genres.genre, 
-        books.description, books.pages, books.pages_read
-FROM ((books
-INNER JOIN authors ON books.author_id = authors.id)
-INNER JOIN genres ON books.genre_id = genres.id)
-WHERE books.id = ?
-""", (book_id,))
-        book = await cursor.fetchone()
-        return book
+async def add_book(name: str, author_id: int, genre_id: int, description: str, pages: int, pages_read: int, session: AsyncSession):
+    new_book = Book(name=name, author_id=author_id, genre_id=genre_id, description=description, pages=pages, pages_read=pages_read)
+    session.add(new_book)
+    await session.commit()
 
 
-async def get_genre_by_id(genre_id: int) -> Row | None:
-    async with aiosqlite.connect(path) as db:
-        cursor = await db.cursor()
-        await cursor.execute("SELECT * FROM genres WHERE id = ?", (genre_id,))
-        genre = await cursor.fetchone()
-        return genre
+async def get_book_by_id(book_id: int, session: AsyncSession) -> Book | None:
+    result = await session.execute(select(Book).options(selectinload(Book.author),
+                                                        selectinload(Book.genre)).where(Book.id == book_id)
+    )
+    return result.scalar_one_or_none()
 
 
-async def get_author_by_id(author_id: int) -> Row | None:
-    async with aiosqlite.connect(path) as db:
-        cursor = await db.cursor()
-        await cursor.execute("SELECT * FROM authors WHERE id = ?", (author_id,))
-        author = await cursor.fetchone()
-        return author
+async def delete_book(book_id: int, session: AsyncSession):
+    await session.execute(delete(Book).where(Book.id == book_id))
+    await session.commit()
+
+
+async def update_read_page(book_id: int, read_page: int, session: AsyncSession):
+    stmt = update(Book).where(Book.id == book_id).values(pages_read=read_page)
+    await session.execute(stmt)
+    await session.commit()
+
+
+async def delete_genre(genre_id: int, session: AsyncSession):
+    await session.execute(delete(Genre).where(Genre.id == genre_id))
+    await session.commit()
+
+
+async def update_name_genre(genre_id: int, genre: str, session: AsyncSession):
+    stmt = update(Genre).where(Genre.id == genre_id).values(genre=genre)
+    await session.execute(stmt)
+    await session.commit()
+
+
+async def delete_author(author_id: int, session: AsyncSession):
+    await session.execute(delete(Author).where(Author.id == author_id))
+    await session.commit()
+
+
+async def update_name_author(author_id: int, author: str, session: AsyncSession):
+    stmt = update(Author).where(Author.id == author_id).values(author=author)
+    await session.execute(stmt)
+    await session.commit()

@@ -1,5 +1,4 @@
 import asyncio
-
 from config import config, register_routers
 from aiogram import Bot, Dispatcher, F
 from Database.db import check_db
