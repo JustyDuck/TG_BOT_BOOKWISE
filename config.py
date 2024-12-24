@@ -1,17 +1,31 @@
 from aiogram import Dispatcher, F
-from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import SecretStr
-from User import comand
+import configparser
+from typing import List
+from User import command
 
 
-class Settings(BaseSettings):
-    bot_token: SecretStr
-    model_config = SettingsConfigDict(env_file='.env', env_file_encoding='utf-8')
+class Settings:
+    def __init__(self, config_file: str):
+        self.config = configparser.ConfigParser()
+        self.config.read(config_file)
+
+    @property
+    def bot_token(self) -> str:
+        return self.config['bot']['bot_token']
+
+    @property
+    def admin_user_ids(self) -> str:
+        return self.config['bot']['admin_user_ids']
+
+    def get_admin_user_ids(self) -> List[int]:
+        return [int(admin_id.strip()) for admin_id in
+
+                self.admin_user_ids.split(',') if admin_id.strip()]
 
 
-config = Settings()
+config = Settings('config.ini')
 
 
 def register_routers(dp: Dispatcher):
-    comand.router.message.filter(F.chat.type == "private")
-    dp.include_router(comand.router)
+    command.router.message.filter(F.chat.type == "private")
+    dp.include_router(command.router)

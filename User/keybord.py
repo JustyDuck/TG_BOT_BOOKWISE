@@ -17,7 +17,7 @@ async def cancel_keyboard() -> InlineKeyboardMarkup:
 async def close_keyboard() -> InlineKeyboardMarkup:
     buttons = [
         [
-            types.InlineKeyboardButton(text="Отмена", callback_data="close")
+            types.InlineKeyboardButton(text="Закрыть", callback_data="close")
         ]
     ]
     keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
@@ -78,18 +78,60 @@ async def edit_book_keyboard(book_id: int) -> InlineKeyboardMarkup:
     return keyboard
 
 
-async def show_books_keyboard(session: AsyncSession, page: int = 0, callback_data: str = "books") -> InlineKeyboardMarkup:
+async def edit_genre_keyboard(genre_id: int, is_admin: bool = False) -> InlineKeyboardMarkup:
+
     buttons = []
 
-    # Получаем книги из базы данных с загруженными авторами и жанрами
-    result = await session.execute(select(Book).options(selectinload(Book.author), selectinload(Book.genre)))
-    books = result.scalars().all()  # Получаем все книги
+    if is_admin:
+        buttons.append([
+            types.InlineKeyboardButton(text="Изменить данные", callback_data=f"change_genre:{genre_id}"),  # изменение
+            types.InlineKeyboardButton(text="Удалить", callback_data=f"delete_genre:{genre_id}")  # удаление
+        ])
+    else:
+        buttons.append([
+            types.InlineKeyboardButton(text="У вас нет прав для изменения или удаления жанра", callback_data="no_permission")
+        ])
+    buttons.append([
+        types.InlineKeyboardButton(text="Отмена", callback_data="close")
+    ])
+    keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
+    return keyboard
 
-    if books:
-        page_items, has_next_page = get_page_from_list(books, page)
+
+async def edit_autor_keyboard(author_id: int, is_admin: bool = False) -> InlineKeyboardMarkup:
+    buttons = []
+    if is_admin:
+        buttons.append([
+            types.InlineKeyboardButton(text="Изменить данные", callback_data=f"change_author: {author_id}"), # изменение
+            types.InlineKeyboardButton(text="Удалить", callback_data=f"delete_author: {author_id}")  # удаление
+        ])
+    else:
+        buttons.append([
+            types.InlineKeyboardButton(text="У вас нет прав для изменения или удаления жанра",
+                                       callback_data="no_permission")
+        ])
+
+    buttons.append([
+        types.InlineKeyboardButton(text="Отмена", callback_data="close")
+    ])
+    keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
+    return keyboard
+
+
+async def show_books_keyboard(session: AsyncSession, page: int, user_id: int,
+                              callback_data: str = "books") -> InlineKeyboardMarkup:
+    buttons = []
+
+    user_books = await get_user_books(user_id, session)
+    if user_books:
+        page_items, has_next_page = get_page_from_list(user_books, page)
+
         for book in page_items:
+            author = book.author.author if book.author else "None"
             buttons.append(
-                [types.InlineKeyboardButton(text=f"{book.name} - {book.author.author}", callback_data=f"open_book:{book.id}")])  # Используем book.author.author для отображения имени автора
+                [types.InlineKeyboardButton(text=f"{book.name} - {author}",
+                                            callback_data=f"open_book:{book.id}")]
+            )
         navigation_buttons_ = get_navigation_buttons(page, has_next_page, callback_data)
         buttons.append(navigation_buttons_)
     else:
@@ -100,21 +142,8 @@ async def show_books_keyboard(session: AsyncSession, page: int = 0, callback_dat
     return keyboard
 
 
-async def edit_genre_keyboard(genre_id: int) -> InlineKeyboardMarkup:
-    buttons = [
-        [
-            types.InlineKeyboardButton(text="Изменить данные", callback_data=f"change_genre: {genre_id}"),  # изменение
-            types.InlineKeyboardButton(text="Удалить", callback_data=f"delete_genre: {genre_id}")  # удаление
-        ],
-        [
-            types.InlineKeyboardButton(text="Отмена", callback_data="close")
-        ]
-    ]
-    keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
-    return keyboard
-
-
-async def show_genre_keyboard(session: AsyncSession, page: int = 0, callback_data: str = "genres") -> InlineKeyboardMarkup:
+async def show_genre_keyboard(session: AsyncSession, page: int = 0, callback_data: str = "genres",
+                              is_admin: bool = False) -> InlineKeyboardMarkup:
     buttons = []
 
     result = await session.execute(select(Genre))
@@ -125,30 +154,20 @@ async def show_genre_keyboard(session: AsyncSession, page: int = 0, callback_dat
         for genre in page_items:
             buttons.append(
                 [types.InlineKeyboardButton(text=f"{genre.genre}", callback_data=f"open_genre:{genre.id}")])
+
         navigation_buttons_ = get_navigation_buttons(page, has_next_page, callback_data)
         buttons.append(navigation_buttons_)
     else:
         buttons.append([types.InlineKeyboardButton(text="Жанр не найден", callback_data="nothing")])
+    if is_admin:
+        buttons.append([types.InlineKeyboardButton(text="Добавить жанр", callback_data="add_genre")])
     buttons.append([types.InlineKeyboardButton(text="Отмена", callback_data="close")])
     keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
     return keyboard
 
 
-async def edit_autor_keyboard(autor_id: int) -> InlineKeyboardMarkup:
-    buttons = [
-        [
-            types.InlineKeyboardButton(text="Изменить данные", callback_data=f"change_autor: {autor_id}"),  # изменение
-            types.InlineKeyboardButton(text="Удалить", callback_data=f"delete_autor: {autor_id}")  # удаление
-        ],
-        [
-            types.InlineKeyboardButton(text="Отмена", callback_data="close")
-        ]
-    ]
-    keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
-    return keyboard
-
-
-async def show_autor_keyboard(session: AsyncSession, page: int = 0, callback_data: str = "authors") -> InlineKeyboardMarkup:
+async def show_author_keyboard(session: AsyncSession, page: int = 0, callback_data: str = "authors",
+                               is_admin: bool = False) -> InlineKeyboardMarkup:
     buttons = []
 
     result = await session.execute(select(Author))
@@ -158,37 +177,51 @@ async def show_autor_keyboard(session: AsyncSession, page: int = 0, callback_dat
         page_items, has_next_page = get_page_from_list(authors, page)
         for author in page_items:
             buttons.append(
-                [types.InlineKeyboardButton(text=f"{author.author}", callback_data=f"open_genre:{author.id}")])
+                [types.InlineKeyboardButton(text=f"{author.author}", callback_data=f"open_author:{author.id}")])
+
         navigation_buttons_ = get_navigation_buttons(page, has_next_page, callback_data)
         buttons.append(navigation_buttons_)
     else:
-        buttons.append([types.InlineKeyboardButton(text="Жанр не найден", callback_data="nothing")])
+        buttons.append([types.InlineKeyboardButton(text="Автор не найден", callback_data="nothing")])
+    if is_admin:
+        buttons.append([types.InlineKeyboardButton(text="Добавить автора", callback_data="add_author")])
     buttons.append([types.InlineKeyboardButton(text="Отмена", callback_data="close")])
     keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
     return keyboard
 
 
-async def genres_keyboard(session: AsyncSession) -> InlineKeyboardMarkup:
+async def genres_keyboard(session: AsyncSession, page: int = 0) -> InlineKeyboardMarkup:
     buttons = []
+
     result = await session.execute(select(Genre))
     genres = result.scalars().all()
 
-    for genre in genres:
+    page_items, has_next_page = get_page_from_list(genres, page)
+    for genre in page_items:
         buttons.append([types.InlineKeyboardButton(text=f"{genre.genre}", callback_data=f"choose_genre:{genre.id}")])
-    buttons.append([types.InlineKeyboardButton(text="Добавить жанр", callback_data="add_genre")])
+
+    navigation_buttons = get_navigation_buttons(page, has_next_page, "genres_page")
+    if navigation_buttons:
+        buttons.append(navigation_buttons)
     buttons.append([types.InlineKeyboardButton(text="Отмена", callback_data="cancel")])
     keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
     return keyboard
 
 
-async def authors_keyboard(session: AsyncSession) -> InlineKeyboardMarkup:
+async def authors_keyboard(session: AsyncSession, page: int = 0) -> InlineKeyboardMarkup:
     buttons = []
+
     result = await session.execute(select(Author))
     authors = result.scalars().all()
 
-    for author in authors:
+    page_items, has_next_page = get_page_from_list(authors, page)
+    for author in page_items:
         buttons.append([types.InlineKeyboardButton(text=f"{author.author}", callback_data=f"choose_author:{author.id}")])
-    buttons.append([types.InlineKeyboardButton(text="Добавить автора", callback_data="add_author")])
+
+    navigation_buttons = get_navigation_buttons(page, has_next_page, "authors_page")
+    if navigation_buttons:
+        buttons.append(navigation_buttons)
     buttons.append([types.InlineKeyboardButton(text="Отмена", callback_data="cancel")])
     keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
     return keyboard
+

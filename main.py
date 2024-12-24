@@ -1,12 +1,12 @@
 import asyncio
 from config import config, register_routers
-from aiogram import Bot, Dispatcher, F
+from aiogram import Bot, Dispatcher
 from Database.db import check_db
 
 
 async def main():
     await check_db()
-    bot = Bot(token=config.bot_token.get_secret_value())
+    bot = Bot(token=config.bot_token)
     dp = Dispatcher()
     register_routers(dp)
     await dp.start_polling(bot)
@@ -14,4 +14,3 @@ async def main():
 
 if __name__ == '__main__':
     asyncio.run(main())
-
